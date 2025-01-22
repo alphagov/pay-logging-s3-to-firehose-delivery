@@ -1,0 +1,23 @@
+{
+  "name": "pay-logging-s3-to-firehose-delivery",
+  "version": "0.0.1",
+  "description": "S3 log events to Firehose delivery lambda",
+  "main": "index.js",
+  "scripts": {
+    "build": "rm -Rf dist && tsc -noEmit && ts-node ./build.ts"
+  },
+  "author": "GOV.UK Pay",
+  "license": "MIT",
+  "engines": {
+    "node": "22.0.0"
+  },
+  "devDependencies": {
+    "@types/archiver": "^6.0.3",
+    "@types/aws-lambda": "^8.10.147",
+    "@types/node": "^22.10.7",
+    "archiver": "^7.0.1",
+    "esbuild": "^0.24.2",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.7.3"
+  }
+}
