@@ -4,7 +4,8 @@
   "description": "S3 log events to Firehose delivery lambda",
   "main": "index.js",
   "scripts": {
-    "build": "rm -Rf dist && tsc -noEmit && ts-node ./build.ts"
+    "build": "rm -Rf dist && tsc -noEmit && ts-node ./build.ts",
+    "test": "jest"
   },
   "author": "GOV.UK Pay",
   "license": "MIT",
@@ -14,9 +15,11 @@
   "devDependencies": {
     "@types/archiver": "^6.0.3",
     "@types/aws-lambda": "^8.10.147",
+    "@types/jest": "^29.5.14",
     "@types/node": "^22.10.7",
     "archiver": "^7.0.1",
     "esbuild": "^0.24.2",
+    "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
     "typescript": "^5.7.3"
   }
