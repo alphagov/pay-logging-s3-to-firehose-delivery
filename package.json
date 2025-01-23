@@ -7,7 +7,8 @@
     "build": "rm -Rf dist && tsc -noEmit && ts-node ./build.ts",
     "test": "jest",
     "lint": "eslint src *.ts",
-    "lint:fix": "npm run lint -- --fix"
+    "lint:fix": "npm run lint -- --fix",
+    "demo": "ts-node ./demo.ts"
   },
   "author": "GOV.UK Pay",
   "license": "MIT",
