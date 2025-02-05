@@ -34,10 +34,8 @@ export const handler: SQSHandler = async (sqsEvent: SQSEvent) => {
     }
   } catch (error: unknown) {
     if (error instanceof Error) {
-      console.error(`Error processing SQS message: ${error.message}`)
       throw new Error(`Error processing SQS message: ${error.message}`)
     } else {
-      console.error(`Error processing SQS message: ${error}`)
       throw new Error(`Error processing SQS message: ${error}`)
     }
   }
@@ -122,8 +120,7 @@ async function sendLogsToFirehose(sourceS3BucketName: string, sourceS3ObjectKey:
 }
 
 async function sendBatchToFirehose(sourceS3BucketName: string, sourceS3ObjectKey: string, batchRecords: string[]) {
-  const joinedUpBatch = batchRecords.join('\n')
-  const recordData: LogRecord = getFirehoseRecordData(sourceS3BucketName, sourceS3ObjectKey, joinedUpBatch)
+  const recordData: LogRecord = getFirehoseRecordData(sourceS3BucketName, sourceS3ObjectKey, batchRecords)
 
   debug(`Data to send to Firehose - ${JSON.stringify(recordData)}`)
 
@@ -138,7 +135,7 @@ async function sendBatchToFirehose(sourceS3BucketName: string, sourceS3ObjectKey
   await firehoseClient.send(command)
 }
 
-function getFirehoseRecordData(sourceS3BucketName: string, sourceS3ObjectKey: string, logData: string) {
+function getFirehoseRecordData(sourceS3BucketName: string, sourceS3ObjectKey: string, batchRecords: string[]) {
   const logRecord: LogRecord = {
     SourceFile: {
       S3Bucket: sourceS3BucketName,
@@ -146,7 +143,7 @@ function getFirehoseRecordData(sourceS3BucketName: string, sourceS3ObjectKey: st
     },
     AWSAccountID: AWS_ACCOUNT_ID,
     AWSAccountName: AWS_ACCOUNT_NAME,
-    Logs: [logData]
+    Logs: batchRecords
   }
 
   if (isALBLog(sourceS3ObjectKey)) {
