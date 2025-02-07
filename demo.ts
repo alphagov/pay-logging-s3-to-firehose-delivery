@@ -17,11 +17,11 @@ const context: Context = {
   fail: () => {
   },
   succeed: () => {
-  }
+  },
 }
 
 const event: S3Event = {
-  Records: []
+  Records: [],
 }
 
 async function runDemo() {

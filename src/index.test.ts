@@ -8,7 +8,7 @@ import { Readable } from 'stream'
 import { promisify } from 'util'
 import { createGunzip, gzip } from 'zlib'
 import { describe } from 'node:test'
-import readline from "node:readline"
+import readline from 'node:readline'
 
 const gzipPromise = promisify(gzip)
 
@@ -19,9 +19,9 @@ let testS3EventNotification
 
 function getSQSEvent() {
   return {
-    "Records": [
-      {"body": JSON.stringify(testS3EventNotification)}
-    ]
+    Records: [
+      { body: JSON.stringify(testS3EventNotification) },
+    ],
   }
 }
 
@@ -35,28 +35,28 @@ describe('Test S3 to Firehose delivery lambda', () => {
     s3Mock.reset()
 
     testS3EventNotification = {
-      "Records": [
+      Records: [
         {
-          "eventVersion": "2.2",
-          "eventSource": "aws:s3",
-          "eventName": "ObjectCreated:Put",
-          "s3": {
-            "bucket": {
-              "name": "source-bucket-name",
+          eventVersion: '2.2',
+          eventSource: 'aws:s3',
+          eventName: 'ObjectCreated:Put',
+          s3: {
+            bucket: {
+              name: 'source-bucket-name',
             },
-            "object": {
-              "key": "[replace-me]"
-            }
-          }
-        }
-      ]
+            object: {
+              key: '[replace-me]',
+            },
+          },
+        },
+      ],
     }
   })
 
   test('should process event notification for S3 access log', async () => {
     testS3EventNotification.Records[0].s3.object.key = 's3/test-bucket/2022-01-21-12-11-52-BEA6D759403DE528.gz'
     const s3ObjectStream = await Readable.from(createLogStream(1, 10))
-    s3Mock.on(GetObjectCommand).resolves({Body: s3ObjectStream})
+    s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
     const sqsEvent = getSQSEvent()
 
@@ -64,20 +64,20 @@ describe('Test S3 to Firehose delivery lambda', () => {
     await handler(sqsEvent)
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
-      'Bucket': 'source-bucket-name',
-      'Key': 's3/test-bucket/2022-01-21-12-11-52-BEA6D759403DE528.gz'
+      Bucket: 'source-bucket-name',
+      Key: 's3/test-bucket/2022-01-21-12-11-52-BEA6D759403DE528.gz',
     })
 
     const rawData = await getStreamDataAsArray(Readable.from(createLogStream(1, 10)))
     verifyFirehoseCallParameters(testS3EventNotification, false, rawData,
-      firehoseMock.call(0).firstArg.input
+      firehoseMock.call(0).firstArg.input,
     )
   })
 
   test('should process event notification for ALB logs', async () => {
     testS3EventNotification.Records[0].s3.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
     const s3ObjectStream = await Readable.from(createLogStream(1, 10))
-    s3Mock.on(GetObjectCommand).resolves({Body: s3ObjectStream})
+    s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
     const sqsEvent = getSQSEvent()
 
@@ -85,20 +85,20 @@ describe('Test S3 to Firehose delivery lambda', () => {
     await handler(sqsEvent)
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
-      'Bucket': 'source-bucket-name',
-      'Key': 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
+      Bucket: 'source-bucket-name',
+      Key: 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz',
     })
 
     const rawData = await getStreamDataAsArray(Readable.from(createLogStream(1, 10)))
     verifyFirehoseCallParameters(testS3EventNotification, true, rawData,
-      firehoseMock.call(0).firstArg.input
+      firehoseMock.call(0).firstArg.input,
     )
   })
 
   test('should split large data into batches when sending to Firehose', async () => {
     testS3EventNotification.Records[0].s3.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
     const s3ObjectStream = await Readable.from(createLogStream(1, 1000))
-    s3Mock.on(GetObjectCommand).resolves({Body: s3ObjectStream})
+    s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
     const sqsEvent = getSQSEvent()
 
@@ -106,18 +106,18 @@ describe('Test S3 to Firehose delivery lambda', () => {
     await handler(sqsEvent)
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
-      'Bucket': 'source-bucket-name',
-      'Key': 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
+      Bucket: 'source-bucket-name',
+      Key: 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz',
     })
 
     const rawData = await getStreamDataAsArray(Readable.from(createLogStream(1, 500)))
     verifyFirehoseCallParameters(testS3EventNotification, true, rawData,
-      firehoseMock.call(0).firstArg.input
+      firehoseMock.call(0).firstArg.input,
     )
 
     const rawDataForSecondBatch = await getStreamDataAsArray(Readable.from(createLogStream(501, 1000)))
     verifyFirehoseCallParameters(testS3EventNotification, true, rawDataForSecondBatch,
-      firehoseMock.call(1).firstArg.input
+      firehoseMock.call(1).firstArg.input,
     )
   })
 
@@ -155,8 +155,8 @@ describe('Test S3 to Firehose delivery lambda', () => {
     await expect(handler(sqsEvent)).rejects.toThrow('Error processing SQS message: Error getting S3 object')
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
-      'Bucket': 'source-bucket-name',
-      'Key': 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
+      Bucket: 'source-bucket-name',
+      Key: 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz',
     })
 
     expect(firehoseMock.commandCalls(PutRecordCommand)).toHaveLength(0)
@@ -165,7 +165,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
   test('should error when ALB name cannot be derived', async () => {
     testS3EventNotification.Records[0].s3.object.key = 'alb/env-2/app-ecs-alb-name/AWS---non-standard-name---/1231241241/elasticloadbalancing/2025/01/01/log.gz'
     const s3ObjectStream = await Readable.from(createLogStream(1, 10))
-    s3Mock.on(GetObjectCommand).resolves({Body: s3ObjectStream})
+    s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
     const sqsEvent = getSQSEvent()
 
@@ -173,8 +173,8 @@ describe('Test S3 to Firehose delivery lambda', () => {
     await expect(handler(sqsEvent)).rejects.toThrow('Error processing SQS message: Error deriving ALB name')
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
-      'Bucket': 'source-bucket-name',
-      'Key': 'alb/env-2/app-ecs-alb-name/AWS---non-standard-name---/1231241241/elasticloadbalancing/2025/01/01/log.gz'
+      Bucket: 'source-bucket-name',
+      Key: 'alb/env-2/app-ecs-alb-name/AWS---non-standard-name---/1231241241/elasticloadbalancing/2025/01/01/log.gz',
     })
 
     expect(firehoseMock.commandCalls(PutRecordCommand)).toHaveLength(0)
@@ -183,7 +183,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
   test('should error when S3 bucket name cannot be derived', async () => {
     testS3EventNotification.Records[0].s3.object.key = 'key-without-any-prefix.gz'
     const s3ObjectStream = await Readable.from(createLogStream(1, 10))
-    s3Mock.on(GetObjectCommand).resolves({Body: s3ObjectStream})
+    s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
     const sqsEvent = getSQSEvent()
 
@@ -191,17 +191,16 @@ describe('Test S3 to Firehose delivery lambda', () => {
     await expect(handler(sqsEvent)).rejects.toThrow('Error processing SQS message: Error deriving S3 bucket name')
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
-      'Bucket': 'source-bucket-name',
-      'Key': 'key-without-any-prefix.gz'
+      Bucket: 'source-bucket-name',
+      Key: 'key-without-any-prefix.gz',
     })
     expect(firehoseMock.commandCalls(PutRecordCommand)).toHaveLength(0)
   })
 
   test('should error when Firehose returns error', async () => {
-
     testS3EventNotification.Records[0].s3.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
     const s3ObjectStream = await Readable.from(createLogStream(1, 10))
-    s3Mock.on(GetObjectCommand).resolves({Body: s3ObjectStream})
+    s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
     firehoseMock.rejects('Error sending logs to Firehose')
 
     const sqsEvent = getSQSEvent()
@@ -210,13 +209,13 @@ describe('Test S3 to Firehose delivery lambda', () => {
     await expect(handler(sqsEvent)).rejects.toThrow('Error processing SQS message: Error sending logs to Firehose')
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
-      'Bucket': 'source-bucket-name',
-      'Key': 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
+      Bucket: 'source-bucket-name',
+      Key: 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz',
     })
 
     const rawData = await getStreamDataAsArray(Readable.from(createLogStream(1, 10)))
     verifyFirehoseCallParameters(testS3EventNotification, true, rawData,
-      firehoseMock.call(0).firstArg.input
+      firehoseMock.call(0).firstArg.input,
     )
   })
 
@@ -252,13 +251,12 @@ describe('Test S3 to Firehose delivery lambda', () => {
     expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(0)
     expect(firehoseMock.commandCalls(PutRecordCommand)).toHaveLength(0)
   })
-
 })
 
 async function getStreamDataAsArray(stream: Readable): Promise<string[]> {
   const batchRecords: string[] = []
   const readStream = readline.createInterface({
-    input: stream.pipe(createGunzip())
+    input: stream.pipe(createGunzip()),
   })
   for await (const line of readStream) {
     batchRecords.push(line)
@@ -274,11 +272,10 @@ async function* createLogStream(startingRange = 1, endingRange = 500) {
 }
 
 const verifyFirehoseCallParameters = (s3Event, isAlbLog, logs, callParameters) => {
-
   const expectedData: LogRecord = {
     SourceFile: {
       S3Bucket: s3Event.Records[0].s3.bucket.name,
-      S3Key: s3Event.Records[0].s3.object.key
+      S3Key: s3Event.Records[0].s3.object.key,
     },
     AWSAccountID: 'test-account-id',
     AWSAccountName: 'test-account-name',
@@ -286,12 +283,13 @@ const verifyFirehoseCallParameters = (s3Event, isAlbLog, logs, callParameters) =
   }
   if (isAlbLog) {
     expectedData.ALB = 'app-ecs-alb-name'
-  } else {
+  }
+  else {
     expectedData.S3Bucket = 'test-bucket'
   }
 
   expect(callParameters.DeliveryStreamName).toBe('test-stream')
   expect(callParameters.Record.Data).toStrictEqual(
-    Buffer.from(JSON.stringify(expectedData))
+    Buffer.from(JSON.stringify(expectedData)),
   )
 }

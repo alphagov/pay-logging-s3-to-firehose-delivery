@@ -7,19 +7,19 @@ import readline from 'node:readline'
 
 const DEBUG = process.env['DEBUG'] === 'true'
 
-const awsRegion = {region: 'eu-west-1'}
+const awsRegion = { region: 'eu-west-1' }
 const s3Client: S3Client = new S3Client(awsRegion)
 const firehoseClient = new FirehoseClient(awsRegion)
 
 export type LogRecord = {
   SourceFile: {
-    S3Bucket: string,
+    S3Bucket: string
     S3Key: string
-  },
-  S3Bucket?: string,
-  ALB?: string,
-  AWSAccountID: string,
-  AWSAccountName: string,
+  }
+  S3Bucket?: string
+  ALB?: string
+  AWSAccountID: string
+  AWSAccountName: string
   Logs: string[]
 }
 
@@ -32,10 +32,12 @@ export const handler: SQSHandler = async (sqsEvent: SQSEvent) => {
     for (const sqsRecord of sqsEvent.Records) {
       await processSqsRecord(sqsRecord)
     }
-  } catch (error: unknown) {
+  }
+  catch (error: unknown) {
     if (error instanceof Error) {
       throw new Error(`Error processing SQS message: ${error.message}`)
-    } else {
+    }
+    else {
       throw new Error(`Error processing SQS message: ${error}`)
     }
   }
@@ -71,21 +73,23 @@ async function processSqsRecord(sqsRecord: SQSRecord) {
         const sourceObjectKey = decodeURIComponent(s3Record.s3.object.key.replace(/\+/g, ' '))
 
         const params = {
-          "Bucket": sourceBucketName,
-          "Key": sourceObjectKey
+          Bucket: sourceBucketName,
+          Key: sourceObjectKey,
         }
         debug(`Getting S3 object ${JSON.stringify(params)}`)
 
         const command: GetObjectCommand = new GetObjectCommand(params)
-        const {Body} = await s3Client.send(command)
+        const { Body } = await s3Client.send(command)
 
         debug(`Sending logs to Firehose`)
         await sendLogsToFirehose(sourceBucketName, sourceObjectKey, Body as Readable)
-      } else {
+      }
+      else {
         debug(`Ignoring non object created event - ${s3Record.eventName}`)
       }
     }
-  } else {
+  }
+  else {
     debug('Invalid S3 event format')
     throw new Error('Invalid S3 event format')
   }
@@ -98,11 +102,12 @@ async function sendLogsToFirehose(sourceS3BucketName: string, sourceS3ObjectKey:
 
   if (isCompressed) {
     readStream = readline.createInterface({
-      input: logDataStream.pipe(createGunzip())
+      input: logDataStream.pipe(createGunzip()),
     })
-  } else {
+  }
+  else {
     readStream = readline.createInterface({
-      input: logDataStream
+      input: logDataStream,
     })
   }
 
@@ -116,7 +121,6 @@ async function sendLogsToFirehose(sourceS3BucketName: string, sourceS3ObjectKey:
   if (batchRecords.length !== 0) {
     await sendBatchToFirehose(sourceS3BucketName, sourceS3ObjectKey, batchRecords)
   }
-
 }
 
 async function sendBatchToFirehose(sourceS3BucketName: string, sourceS3ObjectKey: string, batchRecords: string[]) {
@@ -127,8 +131,8 @@ async function sendBatchToFirehose(sourceS3BucketName: string, sourceS3ObjectKey
   const params = {
     DeliveryStreamName: FIREHOSE_STREAM_NAME,
     Record: {
-      Data: Buffer.from(JSON.stringify(recordData))
-    }
+      Data: Buffer.from(JSON.stringify(recordData)),
+    },
   }
 
   const command: PutRecordCommand = new PutRecordCommand(params)
@@ -139,16 +143,17 @@ function getFirehoseRecordData(sourceS3BucketName: string, sourceS3ObjectKey: st
   const logRecord: LogRecord = {
     SourceFile: {
       S3Bucket: sourceS3BucketName,
-      S3Key: sourceS3ObjectKey
+      S3Key: sourceS3ObjectKey,
     },
     AWSAccountID: AWS_ACCOUNT_ID,
     AWSAccountName: AWS_ACCOUNT_NAME,
-    Logs: batchRecords
+    Logs: batchRecords,
   }
 
   if (isALBLog(sourceS3ObjectKey)) {
     logRecord.ALB = getALBName(sourceS3ObjectKey)
-  } else {
+  }
+  else {
     logRecord.S3Bucket = getS3bucketName(sourceS3ObjectKey)
   }
 
