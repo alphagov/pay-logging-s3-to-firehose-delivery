@@ -3,7 +3,7 @@ import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { FirehoseClient, PutRecordCommand } from '@aws-sdk/client-firehose'
 import { createGunzip } from 'node:zlib'
 import { Readable } from 'node:stream'
-import readline from 'node:readline'
+import * as readline from 'node:readline'
 
 const DEBUG = process.env['DEBUG'] === 'true'
 

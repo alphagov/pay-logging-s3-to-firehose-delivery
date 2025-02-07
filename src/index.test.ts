@@ -1,9 +1,11 @@
+import { Callback, Context, S3Event, SQSEvent } from 'aws-lambda'
 import { handler, LogRecord } from './index'
 
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
-import { FirehoseClient, PutRecordCommand } from '@aws-sdk/client-firehose'
+import { FirehoseClient, PutRecordCommand, PutRecordCommandInput } from '@aws-sdk/client-firehose'
 import { mockClient } from 'aws-sdk-client-mock'
 import 'aws-sdk-client-mock-jest'
+import { sdkStreamMixin } from '@smithy/util-stream'
 import { Readable } from 'stream'
 import { promisify } from 'util'
 import { createGunzip, gzip } from 'zlib'
@@ -15,12 +17,44 @@ const gzipPromise = promisify(gzip)
 const s3Mock = mockClient(S3Client)
 const firehoseMock = mockClient(FirehoseClient)
 
-let testS3EventNotification
+export const mockCallback: Callback = () => undefined
 
-function getSQSEvent() {
+export const mockContext: Context = {
+  awsRequestId: '246fc613-8e0d-482a-9df5-158f2add0665',
+  callbackWaitsForEmptyEventLoop: true,
+  done: () => console.log('Complete'),
+  fail: () => console.log('Error'),
+  functionName: 'firehoseTransform',
+  functionVersion: '$LATEST',
+  getRemainingTimeInMillis: () => 333,
+  invokedFunctionArn: 'arn:aws:lambda:eu-west-2:987654321:function:firehoseTransform',
+  logGroupName: '/aws/lambda/firehoseTransform',
+  logStreamName: '2025/02/06/[$LATEST]123456',
+  memoryLimitInMB: '256',
+  succeed: () => console.log('Great Success'),
+}
+
+let testS3EventNotification: S3Event
+
+function getSQSEvent(): SQSEvent {
   return {
     Records: [
-      { body: JSON.stringify(testS3EventNotification) },
+      {
+        body: JSON.stringify(testS3EventNotification),
+        messageId: 'testMessageId',
+        receiptHandle: 'testReceiptHandle',
+        attributes: {
+          ApproximateReceiveCount: '0',
+          SentTimestamp: 'TestTimestamp',
+          SenderId: 'testSenderId',
+          ApproximateFirstReceiveTimestamp: 'TestApproxFirstReceive',
+        },
+        messageAttributes: {},
+        md5OfBody: '123',
+        eventSource: '123',
+        eventSourceARN: '123',
+        awsRegion: 'eu-west-1',
+      },
     ],
   }
 }
@@ -40,13 +74,32 @@ describe('Test S3 to Firehose delivery lambda', () => {
           eventVersion: '2.2',
           eventSource: 'aws:s3',
           eventName: 'ObjectCreated:Put',
+          awsRegion: 'eu-west-1',
+          eventTime: '2025-02-07T15:28:00Z',
           s3: {
             bucket: {
               name: 'source-bucket-name',
+              ownerIdentity: { principalId: '123' },
+              arn: 'testArn',
             },
             object: {
               key: '[replace-me]',
+              size: 123,
+              eTag: '7d2eb8e5',
+              sequencer: '1',
             },
+            s3SchemaVersion: '1',
+            configurationId: '321',
+          },
+          userIdentity: {
+            principalId: '123',
+          },
+          requestParameters: {
+            sourceIPAddress: '10.0.0.1',
+          },
+          responseElements: {
+            'x-amz-request-id': '118f4e7b-c443-4907-ab02-76f63df25d8a',
+            'x-amz-id-2': '962b161f-6be8-49a8-96ac-89b40563b6f7',
           },
         },
       ],
@@ -55,13 +108,12 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
   test('should process event notification for S3 access log', async () => {
     testS3EventNotification.Records[0].s3.object.key = 's3/test-bucket/2022-01-21-12-11-52-BEA6D759403DE528.gz'
-    const s3ObjectStream = await Readable.from(createLogStream(1, 10))
+    const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 10)))
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
     const sqsEvent = getSQSEvent()
 
-    // noinspection TypeScriptValidateTypes
-    await handler(sqsEvent)
+    await handler(sqsEvent, mockContext, mockCallback)
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
       Bucket: 'source-bucket-name',
@@ -76,13 +128,12 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
   test('should process event notification for ALB logs', async () => {
     testS3EventNotification.Records[0].s3.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
-    const s3ObjectStream = await Readable.from(createLogStream(1, 10))
+    const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 10)))
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
     const sqsEvent = getSQSEvent()
 
-    // noinspection TypeScriptValidateTypes
-    await handler(sqsEvent)
+    await handler(sqsEvent, mockContext, mockCallback)
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
       Bucket: 'source-bucket-name',
@@ -97,13 +148,12 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
   test('should split large data into batches when sending to Firehose', async () => {
     testS3EventNotification.Records[0].s3.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
-    const s3ObjectStream = await Readable.from(createLogStream(1, 1000))
+    const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 1000)))
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
     const sqsEvent = getSQSEvent()
 
-    // noinspection TypeScriptValidateTypes
-    await handler(sqsEvent)
+    await handler(sqsEvent, mockContext, mockCallback)
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
       Bucket: 'source-bucket-name',
@@ -126,20 +176,19 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
     const sqsEvent = getSQSEvent()
 
-    // noinspection TypeScriptValidateTypes
-    await expect(handler(sqsEvent))
+    expect(await handler(sqsEvent, mockContext, mockCallback))
 
     expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(0)
     expect(firehoseMock.commandCalls(PutRecordCommand)).toHaveLength(0)
   })
 
   test('should error when S3Event does not have Records', async () => {
+    // @ts-expect-error: We are explicitly testing for a scenario where the event is missing the records field
     delete testS3EventNotification.Records
 
     const sqsEvent = getSQSEvent()
 
-    // noinspection TypeScriptValidateTypes
-    await expect(handler(sqsEvent)).rejects.toThrow('Error processing SQS message: Invalid S3 event format')
+    await expect(handler(sqsEvent, mockContext, mockCallback)).rejects.toThrow('Error processing SQS message: Invalid S3 event format')
 
     expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(0)
     expect(firehoseMock.commandCalls(PutRecordCommand)).toHaveLength(0)
@@ -151,8 +200,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
     const sqsEvent = getSQSEvent()
 
-    // noinspection TypeScriptValidateTypes
-    await expect(handler(sqsEvent)).rejects.toThrow('Error processing SQS message: Error getting S3 object')
+    await expect(handler(sqsEvent, mockContext, mockCallback)).rejects.toThrow('Error processing SQS message: Error getting S3 object')
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
       Bucket: 'source-bucket-name',
@@ -164,13 +212,12 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
   test('should error when ALB name cannot be derived', async () => {
     testS3EventNotification.Records[0].s3.object.key = 'alb/env-2/app-ecs-alb-name/AWS---non-standard-name---/1231241241/elasticloadbalancing/2025/01/01/log.gz'
-    const s3ObjectStream = await Readable.from(createLogStream(1, 10))
+    const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 10)))
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
     const sqsEvent = getSQSEvent()
 
-    // noinspection TypeScriptValidateTypes
-    await expect(handler(sqsEvent)).rejects.toThrow('Error processing SQS message: Error deriving ALB name')
+    await expect(handler(sqsEvent, mockContext, mockCallback)).rejects.toThrow('Error processing SQS message: Error deriving ALB name')
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
       Bucket: 'source-bucket-name',
@@ -182,13 +229,12 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
   test('should error when S3 bucket name cannot be derived', async () => {
     testS3EventNotification.Records[0].s3.object.key = 'key-without-any-prefix.gz'
-    const s3ObjectStream = await Readable.from(createLogStream(1, 10))
+    const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 10)))
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
     const sqsEvent = getSQSEvent()
 
-    // noinspection TypeScriptValidateTypes
-    await expect(handler(sqsEvent)).rejects.toThrow('Error processing SQS message: Error deriving S3 bucket name')
+    await expect(handler(sqsEvent, mockContext, mockCallback)).rejects.toThrow('Error processing SQS message: Error deriving S3 bucket name')
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
       Bucket: 'source-bucket-name',
@@ -199,14 +245,13 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
   test('should error when Firehose returns error', async () => {
     testS3EventNotification.Records[0].s3.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
-    const s3ObjectStream = await Readable.from(createLogStream(1, 10))
+    const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 10)))
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
     firehoseMock.rejects('Error sending logs to Firehose')
 
     const sqsEvent = getSQSEvent()
 
-    // noinspection TypeScriptValidateTypes
-    await expect(handler(sqsEvent)).rejects.toThrow('Error processing SQS message: Error sending logs to Firehose')
+    await expect(handler(sqsEvent, mockContext, mockCallback)).rejects.toThrow('Error processing SQS message: Error sending logs to Firehose')
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
       Bucket: 'source-bucket-name',
@@ -223,8 +268,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
     delete process.env.FIREHOSE_STREAM_NAME
     const sqsEvent = getSQSEvent()
 
-    // noinspection TypeScriptValidateTypes
-    await expect(handler(sqsEvent)).rejects.toThrow('Environment variable FIREHOSE_STREAM_NAME is missing')
+    await expect(handler(sqsEvent, mockContext, mockCallback)).rejects.toThrow('Environment variable FIREHOSE_STREAM_NAME is missing')
 
     expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(0)
     expect(firehoseMock.commandCalls(PutRecordCommand)).toHaveLength(0)
@@ -234,8 +278,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
     delete process.env.AWS_ACCOUNT_ID
     const sqsEvent = getSQSEvent()
 
-    // noinspection TypeScriptValidateTypes
-    await expect(handler(sqsEvent)).rejects.toThrow('Environment variable AWS_ACCOUNT_ID is missing')
+    await expect(handler(sqsEvent, mockContext, mockCallback)).rejects.toThrow('Environment variable AWS_ACCOUNT_ID is missing')
 
     expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(0)
     expect(firehoseMock.commandCalls(PutRecordCommand)).toHaveLength(0)
@@ -246,7 +289,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
     const sqsEvent = getSQSEvent()
 
     // noinspection TypeScriptValidateTypes
-    await expect(handler(sqsEvent)).rejects.toThrow('Environment variable AWS_ACCOUNT_NAME is missing')
+    await expect(handler(sqsEvent, mockContext, mockCallback)).rejects.toThrow('Environment variable AWS_ACCOUNT_NAME is missing')
 
     expect(s3Mock.commandCalls(GetObjectCommand)).toHaveLength(0)
     expect(firehoseMock.commandCalls(PutRecordCommand)).toHaveLength(0)
@@ -271,7 +314,7 @@ async function* createLogStream(startingRange = 1, endingRange = 500) {
   }
 }
 
-const verifyFirehoseCallParameters = (s3Event, isAlbLog, logs, callParameters) => {
+const verifyFirehoseCallParameters = (s3Event: S3Event, isAlbLog: boolean, logs: string[], callParameters: PutRecordCommandInput) => {
   const expectedData: LogRecord = {
     SourceFile: {
       S3Bucket: s3Event.Records[0].s3.bucket.name,
@@ -289,7 +332,7 @@ const verifyFirehoseCallParameters = (s3Event, isAlbLog, logs, callParameters) =
   }
 
   expect(callParameters.DeliveryStreamName).toBe('test-stream')
-  expect(callParameters.Record.Data).toStrictEqual(
+  expect(callParameters.Record?.Data).toStrictEqual(
     Buffer.from(JSON.stringify(expectedData)),
   )
 }
