@@ -14,7 +14,7 @@
   "author": "GOV.UK Pay",
   "license": "MIT",
   "engines": {
-    "node": "22.0.0"
+    "node": "22.13.1"
   },
   "devDependencies": {
     "@aws-sdk/client-firehose": "^3.738.0",
