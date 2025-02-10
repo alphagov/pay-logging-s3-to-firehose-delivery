@@ -4,7 +4,7 @@ import { build } from 'esbuild'
 import * as fs from 'fs'
 import archiver from 'archiver'
 
-build({
+void build({
   logLevel: 'info',
   bundle: true,
   minify: false,
@@ -16,10 +16,10 @@ build({
 }).then(() => {
   const output = fs.createWriteStream(__dirname + `/dist/${name}-v${version}.zip`)
   const archive = archiver('zip', {
-    zlib: {level: 9},
+    zlib: { level: 9 }
   })
   archive.pipe(output)
   const lambdaCode = __dirname + '/dist/index.js'
-  archive.append(fs.createReadStream(lambdaCode), {name: 'index.js'})
-  archive.finalize()
+  archive.append(fs.createReadStream(lambdaCode), { name: 'index.js' })
+  void archive.finalize()
 })
