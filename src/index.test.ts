@@ -31,7 +31,7 @@ export const mockContext: Context = {
   logGroupName: '/aws/lambda/firehoseTransform',
   logStreamName: '2025/02/06/[$LATEST]123456',
   memoryLimitInMB: '256',
-  succeed: () => console.log('Great Success'),
+  succeed: () => console.log('Great Success')
 }
 
 let testS3EventNotification: S3Event
@@ -47,15 +47,15 @@ function getSQSEvent(): SQSEvent {
           ApproximateReceiveCount: '0',
           SentTimestamp: 'TestTimestamp',
           SenderId: 'testSenderId',
-          ApproximateFirstReceiveTimestamp: 'TestApproxFirstReceive',
+          ApproximateFirstReceiveTimestamp: 'TestApproxFirstReceive'
         },
         messageAttributes: {},
         md5OfBody: '123',
         eventSource: '123',
         eventSourceARN: '123',
-        awsRegion: 'eu-west-1',
-      },
-    ],
+        awsRegion: 'eu-west-1'
+      }
+    ]
   }
 }
 
@@ -80,29 +80,29 @@ describe('Test S3 to Firehose delivery lambda', () => {
             bucket: {
               name: 'source-bucket-name',
               ownerIdentity: { principalId: '123' },
-              arn: 'testArn',
+              arn: 'testArn'
             },
             object: {
               key: '[replace-me]',
               size: 123,
               eTag: '7d2eb8e5',
-              sequencer: '1',
+              sequencer: '1'
             },
             s3SchemaVersion: '1',
-            configurationId: '321',
+            configurationId: '321'
           },
           userIdentity: {
-            principalId: '123',
+            principalId: '123'
           },
           requestParameters: {
-            sourceIPAddress: '10.0.0.1',
+            sourceIPAddress: '10.0.0.1'
           },
           responseElements: {
             'x-amz-request-id': '118f4e7b-c443-4907-ab02-76f63df25d8a',
-            'x-amz-id-2': '962b161f-6be8-49a8-96ac-89b40563b6f7',
-          },
-        },
-      ],
+            'x-amz-id-2': '962b161f-6be8-49a8-96ac-89b40563b6f7'
+          }
+        }
+      ]
     }
   })
 
@@ -117,12 +117,12 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
       Bucket: 'source-bucket-name',
-      Key: 's3/test-bucket/2022-01-21-12-11-52-BEA6D759403DE528.gz',
+      Key: 's3/test-bucket/2022-01-21-12-11-52-BEA6D759403DE528.gz'
     })
 
     const rawData = await getStreamDataAsArray(Readable.from(createLogStream(1, 10)))
     verifyFirehoseCallParameters(testS3EventNotification, false, rawData,
-      firehoseMock.call(0).firstArg.input,
+      firehoseMock.call(0).firstArg.input
     )
   })
 
@@ -137,12 +137,12 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
       Bucket: 'source-bucket-name',
-      Key: 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz',
+      Key: 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
     })
 
     const rawData = await getStreamDataAsArray(Readable.from(createLogStream(1, 10)))
     verifyFirehoseCallParameters(testS3EventNotification, true, rawData,
-      firehoseMock.call(0).firstArg.input,
+      firehoseMock.call(0).firstArg.input
     )
   })
 
@@ -157,17 +157,17 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
       Bucket: 'source-bucket-name',
-      Key: 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz',
+      Key: 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
     })
 
     const rawData = await getStreamDataAsArray(Readable.from(createLogStream(1, 500)))
     verifyFirehoseCallParameters(testS3EventNotification, true, rawData,
-      firehoseMock.call(0).firstArg.input,
+      firehoseMock.call(0).firstArg.input
     )
 
     const rawDataForSecondBatch = await getStreamDataAsArray(Readable.from(createLogStream(501, 1000)))
     verifyFirehoseCallParameters(testS3EventNotification, true, rawDataForSecondBatch,
-      firehoseMock.call(1).firstArg.input,
+      firehoseMock.call(1).firstArg.input
     )
   })
 
@@ -204,7 +204,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
       Bucket: 'source-bucket-name',
-      Key: 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz',
+      Key: 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
     })
 
     expect(firehoseMock.commandCalls(PutRecordCommand)).toHaveLength(0)
@@ -221,7 +221,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
       Bucket: 'source-bucket-name',
-      Key: 'alb/env-2/app-ecs-alb-name/AWS---non-standard-name---/1231241241/elasticloadbalancing/2025/01/01/log.gz',
+      Key: 'alb/env-2/app-ecs-alb-name/AWS---non-standard-name---/1231241241/elasticloadbalancing/2025/01/01/log.gz'
     })
 
     expect(firehoseMock.commandCalls(PutRecordCommand)).toHaveLength(0)
@@ -238,7 +238,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
       Bucket: 'source-bucket-name',
-      Key: 'key-without-any-prefix.gz',
+      Key: 'key-without-any-prefix.gz'
     })
     expect(firehoseMock.commandCalls(PutRecordCommand)).toHaveLength(0)
   })
@@ -255,12 +255,12 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
     expect(s3Mock.call(0).firstArg.input).toStrictEqual({
       Bucket: 'source-bucket-name',
-      Key: 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz',
+      Key: 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
     })
 
     const rawData = await getStreamDataAsArray(Readable.from(createLogStream(1, 10)))
     verifyFirehoseCallParameters(testS3EventNotification, true, rawData,
-      firehoseMock.call(0).firstArg.input,
+      firehoseMock.call(0).firstArg.input
     )
   })
 
@@ -299,7 +299,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
 async function getStreamDataAsArray(stream: Readable): Promise<string[]> {
   const batchRecords: string[] = []
   const readStream = readline.createInterface({
-    input: stream.pipe(createGunzip()),
+    input: stream.pipe(createGunzip())
   })
   for await (const line of readStream) {
     batchRecords.push(line)
@@ -318,21 +318,20 @@ const verifyFirehoseCallParameters = (s3Event: S3Event, isAlbLog: boolean, logs:
   const expectedData: LogRecord = {
     SourceFile: {
       S3Bucket: s3Event.Records[0].s3.bucket.name,
-      S3Key: s3Event.Records[0].s3.object.key,
+      S3Key: s3Event.Records[0].s3.object.key
     },
     AWSAccountID: 'test-account-id',
     AWSAccountName: 'test-account-name',
-    Logs: logs,
+    Logs: logs
   }
   if (isAlbLog) {
     expectedData.ALB = 'app-ecs-alb-name'
-  }
-  else {
+  } else {
     expectedData.S3Bucket = 'test-bucket'
   }
 
   expect(callParameters.DeliveryStreamName).toBe('test-stream')
   expect(callParameters.Record?.Data).toStrictEqual(
-    Buffer.from(JSON.stringify(expectedData)),
+    Buffer.from(JSON.stringify(expectedData))
   )
 }

@@ -14,4 +14,8 @@ export default tseslint.config(
       },
     },
   },
+  stylistic.configs.customize({
+    braceStyle: "1tbs",
+    commaDangle: "never"
+  })
 )

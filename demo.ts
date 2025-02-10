@@ -17,11 +17,11 @@ const context: Context = {
   fail: () => {
   },
   succeed: () => {
-  },
+  }
 }
 
 const event: SQSEvent = {
-  Records: [],
+  Records: []
 }
 
 async function runDemo() {
