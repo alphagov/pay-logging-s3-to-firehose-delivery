@@ -3,23 +3,23 @@ import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { FirehoseClient, PutRecordCommand } from '@aws-sdk/client-firehose'
 import { createGunzip } from 'node:zlib'
 import { Readable } from 'node:stream'
-import readline from 'node:readline'
+import * as readline from 'node:readline'
 
 const DEBUG = process.env['DEBUG'] === 'true'
 
-const awsRegion = {region: 'eu-west-1'}
+const awsRegion = { region: 'eu-west-1' }
 const s3Client: S3Client = new S3Client(awsRegion)
 const firehoseClient = new FirehoseClient(awsRegion)
 
 export type LogRecord = {
   SourceFile: {
-    S3Bucket: string,
+    S3Bucket: string
     S3Key: string
-  },
-  S3Bucket?: string,
-  ALB?: string,
-  AWSAccountID: string,
-  AWSAccountName: string,
+  }
+  S3Bucket?: string
+  ALB?: string
+  AWSAccountID: string
+  AWSAccountName: string
   Logs: string[]
 }
 
@@ -71,13 +71,13 @@ async function processSqsRecord(sqsRecord: SQSRecord) {
         const sourceObjectKey = decodeURIComponent(s3Record.s3.object.key.replace(/\+/g, ' '))
 
         const params = {
-          "Bucket": sourceBucketName,
-          "Key": sourceObjectKey
+          Bucket: sourceBucketName,
+          Key: sourceObjectKey
         }
         debug(`Getting S3 object ${JSON.stringify(params)}`)
 
         const command: GetObjectCommand = new GetObjectCommand(params)
-        const {Body} = await s3Client.send(command)
+        const { Body } = await s3Client.send(command)
 
         debug(`Sending logs to Firehose`)
         await sendLogsToFirehose(sourceBucketName, sourceObjectKey, Body as Readable)
@@ -116,7 +116,6 @@ async function sendLogsToFirehose(sourceS3BucketName: string, sourceS3ObjectKey:
   if (batchRecords.length !== 0) {
     await sendBatchToFirehose(sourceS3BucketName, sourceS3ObjectKey, batchRecords)
   }
-
 }
 
 async function sendBatchToFirehose(sourceS3BucketName: string, sourceS3ObjectKey: string, batchRecords: string[]) {

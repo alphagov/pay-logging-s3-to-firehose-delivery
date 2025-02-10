@@ -5,21 +5,23 @@
   "main": "index.js",
   "scripts": {
     "compile": "tsc",
-    "build": "rm -Rf dist && tsc -noEmit && ts-node ./build.ts",
+    "build": "rm -Rf dist && npm run lint && ts-node ./build.ts",
     "test": "jest",
-    "lint": "eslint src *.ts",
+    "lint": "tsc -noEmit && eslint src demo.ts",
     "lint:fix": "npm run lint -- --fix",
     "demo": "ts-node ./demo.ts"
   },
   "author": "GOV.UK Pay",
   "license": "MIT",
   "engines": {
-    "node": "22.0.0"
+    "node": "22.13.1"
   },
   "devDependencies": {
     "@aws-sdk/client-firehose": "^3.738.0",
     "@aws-sdk/client-s3": "^3.735.0",
     "@eslint/js": "^9.18.0",
+    "@smithy/util-stream": "^4.0.2",
+    "@stylistic/eslint-plugin": "^3.0.1",
     "@types/archiver": "^6.0.3",
     "@types/aws-lambda": "^8.10.147",
     "@types/jest": "^29.5.14",
