@@ -1,4 +1,4 @@
-import { S3Event, SQSEvent, SQSHandler, SQSRecord } from 'aws-lambda'
+import { S3ObjectCreatedNotificationEvent, SQSEvent, SQSHandler, SQSRecord } from 'aws-lambda'
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { FirehoseClient, PutRecordCommand } from '@aws-sdk/client-firehose'
 import { createGunzip } from 'node:zlib'
@@ -61,34 +61,33 @@ function checkAndGetEnvironmentVariables() {
 }
 
 async function processSqsRecord(sqsRecord: SQSRecord) {
-  const s3EventNotification: S3Event = JSON.parse(sqsRecord.body)
+  const eventBridgeEvent: S3ObjectCreatedNotificationEvent = JSON.parse(sqsRecord.body)
   debug(`Received message: ${sqsRecord.body}`)
 
-  if (s3EventNotification.Records) {
-    for (const s3Record of s3EventNotification.Records) {
-      if (s3Record.eventName && s3Record.eventName.startsWith('ObjectCreated')) {
-        const sourceBucketName = s3Record.s3.bucket.name
-        const sourceObjectKey = decodeURIComponent(s3Record.s3.object.key.replace(/\+/g, ' '))
-
-        const params = {
-          Bucket: sourceBucketName,
-          Key: sourceObjectKey
-        }
-        debug(`Getting S3 object ${JSON.stringify(params)}`)
-
-        const command: GetObjectCommand = new GetObjectCommand(params)
-        const { Body } = await s3Client.send(command)
-
-        debug(`Sending logs to Firehose`)
-        await sendLogsToFirehose(sourceBucketName, sourceObjectKey, Body as Readable)
-      } else {
-        debug(`Ignoring non object created event - ${s3Record.eventName}`)
-      }
-    }
-  } else {
+  if (eventBridgeEvent.source != 'aws.s3') {
     debug('Invalid S3 event format')
     throw new Error('Invalid S3 event format')
   }
+
+  if (eventBridgeEvent['detail-type'] !== 'Object Created') {
+    debug(`Ignoring non object created event - ${eventBridgeEvent['detail-type']}`)
+    return
+  }
+
+  const sourceBucketName = eventBridgeEvent.detail.bucket.name
+  const sourceObjectKey = decodeURIComponent(eventBridgeEvent.detail.object.key.replace(/\+/g, ' '))
+
+  const params = {
+    Bucket: sourceBucketName,
+    Key: sourceObjectKey
+  }
+  debug(`Getting S3 object ${JSON.stringify(params)}`)
+
+  const command: GetObjectCommand = new GetObjectCommand(params)
+  const { Body } = await s3Client.send(command)
+
+  debug(`Sending logs to Firehose`)
+  await sendLogsToFirehose(sourceBucketName, sourceObjectKey, Body as Readable)
 }
 
 async function sendLogsToFirehose(sourceS3BucketName: string, sourceS3ObjectKey: string, logDataStream: Readable) {
