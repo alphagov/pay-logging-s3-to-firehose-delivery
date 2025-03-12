@@ -1,4 +1,4 @@
-import { Callback, Context, S3Event, SQSEvent } from 'aws-lambda'
+import { Callback, Context, S3ObjectCreatedNotificationEvent, SQSEvent } from 'aws-lambda'
 import { handler, LogRecord } from './index'
 
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
@@ -34,7 +34,7 @@ export const mockContext: Context = {
   succeed: () => console.log('Great Success')
 }
 
-let testS3EventNotification: S3Event
+let testS3EventNotification: S3ObjectCreatedNotificationEvent
 
 function getSQSEvent(): SQSEvent {
   return {
@@ -69,45 +69,38 @@ describe('Test S3 to Firehose delivery lambda', () => {
     s3Mock.reset()
 
     testS3EventNotification = {
-      Records: [
-        {
-          eventVersion: '2.2',
-          eventSource: 'aws:s3',
-          eventName: 'ObjectCreated:Put',
-          awsRegion: 'eu-west-1',
-          eventTime: '2025-02-07T15:28:00Z',
-          s3: {
-            bucket: {
-              name: 'source-bucket-name',
-              ownerIdentity: { principalId: '123' },
-              arn: 'testArn'
-            },
-            object: {
-              key: '[replace-me]',
-              size: 123,
-              eTag: '7d2eb8e5',
-              sequencer: '1'
-            },
-            s3SchemaVersion: '1',
-            configurationId: '321'
-          },
-          userIdentity: {
-            principalId: '123'
-          },
-          requestParameters: {
-            sourceIPAddress: '10.0.0.1'
-          },
-          responseElements: {
-            'x-amz-request-id': '118f4e7b-c443-4907-ab02-76f63df25d8a',
-            'x-amz-id-2': '962b161f-6be8-49a8-96ac-89b40563b6f7'
-          }
-        }
-      ]
+      'version': '0',
+      'id': '09fd2db4-c8d2-49b5-2ed9-0d53ccb974a1',
+      'detail-type': 'Object Created',
+      'source': 'aws.s3',
+      'account': '673337093959',
+      'time': '2025-03-11T15:15:17Z',
+      'region': 'eu-west-1',
+      'resources': [
+        'arn:aws:s3:::pay-govuk-logs-dev'
+      ],
+      'detail': {
+        'version': '0',
+        'bucket': {
+          name: 'source-bucket-name'
+        },
+        'object': {
+          'key': 's3/pay-govuk-logs-dev/2025-03-11-15-15-17-CEE11AE3E5936EB7',
+          'size': 697,
+          'etag': '9e0874ce5ca756623f77d84e8dd590c2', // pragma: allowlist secret
+          'version-id': '3RQ_9PFK38dNzH0QTlxSUQ8GnoV8y4M.',
+          'sequencer': '0067D05385D07DC19E' // pragma: allowlist secret
+        },
+        'request-id': '3G3FXB9GBGEB0PXN',
+        'requester': 's3.amazonaws.com',
+        'source-ip-address': '172.21.46.92',
+        'reason': 'PutObject'
+      }
     }
   })
 
   test('should process event notification for S3 access log', async () => {
-    testS3EventNotification.Records[0].s3.object.key = 's3/test-bucket/2022-01-21-12-11-52-BEA6D759403DE528.gz'
+    testS3EventNotification.detail.object.key = 's3/test-bucket/2022-01-21-12-11-52-BEA6D759403DE528.gz'
     const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 10)))
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
@@ -127,7 +120,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
   })
 
   test('should process event notification for ALB logs', async () => {
-    testS3EventNotification.Records[0].s3.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
+    testS3EventNotification.detail.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
     const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 10)))
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
@@ -147,7 +140,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
   })
 
   test('should split large data into batches when sending to Firehose', async () => {
-    testS3EventNotification.Records[0].s3.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
+    testS3EventNotification.detail.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
     const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 1000)))
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
@@ -172,7 +165,8 @@ describe('Test S3 to Firehose delivery lambda', () => {
   })
 
   test('should ignore non ObjectCreated events', async () => {
-    testS3EventNotification.Records[0].eventName = 'ObjectRemoved:*'
+    // @ts-expect-error: We are explicitly testing for a scenario where the detail-type isn't Object Created
+    testS3EventNotification['detail-type'] = 'Object Removed'
 
     const sqsEvent = getSQSEvent()
 
@@ -182,9 +176,9 @@ describe('Test S3 to Firehose delivery lambda', () => {
     expect(firehoseMock.commandCalls(PutRecordCommand)).toHaveLength(0)
   })
 
-  test('should error when S3Event does not have Records', async () => {
+  test('should error when S3Event is of the wrong type', async () => {
     // @ts-expect-error: We are explicitly testing for a scenario where the event is missing the records field
-    delete testS3EventNotification.Records
+    testS3EventNotification.source = 'aws.cloudtrail'
 
     const sqsEvent = getSQSEvent()
 
@@ -195,7 +189,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
   })
 
   test('should error when S3 client returns error', async () => {
-    testS3EventNotification.Records[0].s3.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
+    testS3EventNotification.detail.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
     s3Mock.rejects('Error getting S3 object')
 
     const sqsEvent = getSQSEvent()
@@ -211,7 +205,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
   })
 
   test('should error when ALB name cannot be derived', async () => {
-    testS3EventNotification.Records[0].s3.object.key = 'alb/env-2/app-ecs-alb-name/AWS---non-standard-name---/1231241241/elasticloadbalancing/2025/01/01/log.gz'
+    testS3EventNotification.detail.object.key = 'alb/env-2/app-ecs-alb-name/AWS---non-standard-name---/1231241241/elasticloadbalancing/2025/01/01/log.gz'
     const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 10)))
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
@@ -228,7 +222,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
   })
 
   test('should error when S3 bucket name cannot be derived', async () => {
-    testS3EventNotification.Records[0].s3.object.key = 'key-without-any-prefix.gz'
+    testS3EventNotification.detail.object.key = 'key-without-any-prefix.gz'
     const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 10)))
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
@@ -244,7 +238,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
   })
 
   test('should error when Firehose returns error', async () => {
-    testS3EventNotification.Records[0].s3.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
+    testS3EventNotification.detail.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
     const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 10)))
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
     firehoseMock.rejects('Error sending logs to Firehose')
@@ -314,11 +308,11 @@ async function* createLogStream(startingRange = 1, endingRange = 500) {
   }
 }
 
-const verifyFirehoseCallParameters = (s3Event: S3Event, isAlbLog: boolean, logs: string[], callParameters: PutRecordCommandInput) => {
+const verifyFirehoseCallParameters = (s3Event: S3ObjectCreatedNotificationEvent, isAlbLog: boolean, logs: string[], callParameters: PutRecordCommandInput) => {
   const expectedData: LogRecord = {
     SourceFile: {
-      S3Bucket: s3Event.Records[0].s3.bucket.name,
-      S3Key: s3Event.Records[0].s3.object.key
+      S3Bucket: s3Event.detail.bucket.name,
+      S3Key: s3Event.detail.object.key
     },
     AWSAccountID: 'test-account-id',
     AWSAccountName: 'test-account-name',
