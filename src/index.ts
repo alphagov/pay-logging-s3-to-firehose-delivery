@@ -34,7 +34,17 @@ export const handler: SQSHandler = async (sqsEvent: SQSEvent) => {
     }
   } catch (error: unknown) {
     if (error instanceof Error) {
-      throw new Error(`Error processing SQS message: ${error.message}`)
+      let errorMessage = `Error processing SQS message: ${error.message}`
+
+      if (error.cause !== undefined) {
+        errorMessage += `\nCause: ${error.cause}`
+      }
+
+      if (error.stack !== undefined) {
+        errorMessage += `\nStack: ${error.stack}`
+      }
+
+      throw new Error(errorMessage)
     } else {
       throw new Error(`Error processing SQS message: ${error}`)
     }
