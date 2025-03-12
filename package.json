@@ -1,6 +1,6 @@
 {
   "name": "pay-logging-s3-to-firehose-delivery",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "S3 log events to Firehose delivery lambda",
   "main": "index.js",
   "scripts": {
