@@ -1,6 +1,5 @@
 import { S3ObjectCreatedNotificationEvent, SQSBatchResponse, SQSEvent, SQSHandler, SQSRecord } from 'aws-lambda'
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
-import { ChangeMessageVisibilityCommand, SQSClient } from '@aws-sdk/client-sqs'
 import { FirehoseClient, PutRecordCommand } from '@aws-sdk/client-firehose'
 import { createGunzip } from 'node:zlib'
 import { Readable } from 'node:stream'
@@ -10,11 +9,7 @@ const DEBUG = process.env['DEBUG'] === 'true'
 
 const awsRegion = { region: 'eu-west-1' }
 const s3Client: S3Client = new S3Client(awsRegion)
-const sqsClient: SQSClient = new SQSClient(awsRegion)
-const firehoseClient = new FirehoseClient({
-  ...awsRegion,
-  maxAttempts: 2
-})
+const firehoseClient = new FirehoseClient(awsRegion)
 
 export type LogRecord = {
   SourceFile: {
@@ -34,7 +29,7 @@ export const handler: SQSHandler = async (sqsEvent: SQSEvent): Promise<SQSBatchR
   try {
     ({ AWS_ACCOUNT_ID, AWS_ACCOUNT_NAME, FIREHOSE_STREAM_NAME } = checkAndGetEnvironmentVariables())
 
-    return await processSqsEventWithBackoffRetries(sqsEvent)
+    return await processSQSEventWithSlowDownHandler(sqsEvent)
   } catch (error: unknown) {
     if (error instanceof Error) {
       let errorMessage = `Error processing SQS message: ${error.message}`
@@ -73,7 +68,7 @@ function checkAndGetEnvironmentVariables() {
   return { FIREHOSE_STREAM_NAME, AWS_ACCOUNT_ID, AWS_ACCOUNT_NAME }
 }
 
-async function processSqsEventWithBackoffRetries(sqsEvent: SQSEvent): Promise<SQSBatchResponse> {
+async function processSQSEventWithSlowDownHandler(sqsEvent: SQSEvent): Promise<SQSBatchResponse> {
   const batchResponse: SQSBatchResponse = {
     batchItemFailures: []
   }
@@ -82,7 +77,6 @@ async function processSqsEventWithBackoffRetries(sqsEvent: SQSEvent): Promise<SQ
   for (const sqsRecord of sqsEvent.Records) {
     if (firehoseSlowDownReceived) {
       batchResponse.batchItemFailures.push({ itemIdentifier: sqsRecord.messageId })
-      addSQSMessageDelay(sqsRecord)
       continue
     }
 
@@ -92,7 +86,6 @@ async function processSqsEventWithBackoffRetries(sqsEvent: SQSEvent): Promise<SQ
       if (error instanceof Error && error.message === 'Slow down.') {
         firehoseSlowDownReceived = true
         batchResponse.batchItemFailures.push({ itemIdentifier: sqsRecord.messageId })
-        addSQSMessageDelay(sqsRecord)
       } else {
         throw error
       }
@@ -193,22 +186,6 @@ function getFirehoseRecordData(sourceS3BucketName: string, sourceS3ObjectKey: st
   }
 
   return logRecord
-}
-
-async function addSQSMessageDelay(sqsRecord: SQSRecord) {
-  const newVisibility = (parseInt(sqsRecord.attributes.ApproximateReceiveCount, 10) + 1) * 20
-
-  const sqsQueueName = sqsRecord.eventSourceARN.split('/').at(-1)
-
-  const command = new ChangeMessageVisibilityCommand({
-    QueueUrl: `https://sqs.${awsRegion.region}.amazonaws.com/${AWS_ACCOUNT_ID}/${sqsQueueName}`,
-    ReceiptHandle: sqsRecord.receiptHandle,
-    VisibilityTimeout: newVisibility
-  })
-
-  console.log(`Delaying message ${sqsRecord.receiptHandle} by ${newVisibility} seconds in SQS`)
-
-  await sqsClient.send(command)
 }
 
 function isALBLog(sourceS3ObjectKey: string): boolean {

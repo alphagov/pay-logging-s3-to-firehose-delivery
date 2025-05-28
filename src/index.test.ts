@@ -2,7 +2,6 @@ import { Callback, Context, S3ObjectCreatedNotificationEvent, SQSBatchResponse, 
 import { handler, LogRecord } from './index'
 
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
-import { ChangeMessageVisibilityCommand, SQSClient } from '@aws-sdk/client-sqs'
 import { FirehoseClient, PutRecordCommand, PutRecordCommandInput } from '@aws-sdk/client-firehose'
 import { mockClient } from 'aws-sdk-client-mock'
 import 'aws-sdk-client-mock-jest'
@@ -16,7 +15,6 @@ import readline from 'node:readline'
 const gzipPromise = promisify(gzip)
 
 const s3Mock = mockClient(S3Client)
-const sqsMock = mockClient(SQSClient)
 const firehoseMock = mockClient(FirehoseClient)
 
 export const mockCallback: Callback = () => undefined
@@ -71,7 +69,6 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
     firehoseMock.reset()
     s3Mock.reset()
-    sqsMock.reset()
 
     testS3EventNotification = {
       'version': '0',
@@ -193,8 +190,6 @@ describe('Test S3 to Firehose delivery lambda', () => {
     ]
     s3Mock.on(GetObjectCommand).resolvesOnce({ Body: s3ObjectStreams[0] }).resolvesOnce({ Body: s3ObjectStreams[1] })
 
-    sqsMock.on(ChangeMessageVisibilityCommand).resolves({})
-
     firehoseMock
       .on(PutRecordCommand)
       .resolvesOnce({})
@@ -216,64 +211,6 @@ describe('Test S3 to Firehose delivery lambda', () => {
     ])
 
     expect(firehoseMock.commandCalls(PutRecordCommand)).toHaveLength(2)
-  })
-
-  test('should delay messages longer based on the receive count', async () => {
-    testS3EventNotification.detail.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
-    const s3ObjectStreams = [
-      sdkStreamMixin(Readable.from(createLogStream(1, 10))),
-      sdkStreamMixin(Readable.from(createLogStream(1, 10)))
-    ]
-    s3Mock.on(GetObjectCommand).resolvesOnce({ Body: s3ObjectStreams[0] }).resolvesOnce({ Body: s3ObjectStreams[1] })
-
-    sqsMock.on(ChangeMessageVisibilityCommand).resolves({})
-
-    firehoseMock
-      .on(PutRecordCommand)
-      .rejects('Slow down.')
-
-    const sqsEvent = getSQSEvent(4)
-
-    sqsEvent.Records[0].attributes.ApproximateReceiveCount = '0'
-    sqsEvent.Records[1].attributes.ApproximateReceiveCount = '1'
-    sqsEvent.Records[2].attributes.ApproximateReceiveCount = '2'
-    sqsEvent.Records[3].attributes.ApproximateReceiveCount = '3'
-
-    const response = await handler(sqsEvent, mockContext, mockCallback)
-
-    expect(response).toBeDefined()
-
-    const typedResponse = response as SQSBatchResponse
-
-    expect(typedResponse.batchItemFailures).toEqual([
-      { itemIdentifier: 'testMessageId0' },
-      { itemIdentifier: 'testMessageId1' },
-      { itemIdentifier: 'testMessageId2' },
-      { itemIdentifier: 'testMessageId3' }
-    ])
-
-    expect(firehoseMock.commandCalls(PutRecordCommand)).toHaveLength(1)
-
-    expect(sqsMock).toHaveReceivedNthCommandWith(1, ChangeMessageVisibilityCommand, {
-      QueueUrl: 'https://sqs.eu-west-1.amazonaws.com/test-account-id/TestQueue',
-      ReceiptHandle: 'testReceiptHandle0',
-      VisibilityTimeout: 20
-    })
-    expect(sqsMock).toHaveReceivedNthCommandWith(2, ChangeMessageVisibilityCommand, {
-      QueueUrl: 'https://sqs.eu-west-1.amazonaws.com/test-account-id/TestQueue',
-      ReceiptHandle: 'testReceiptHandle1',
-      VisibilityTimeout: 40
-    })
-    expect(sqsMock).toHaveReceivedNthCommandWith(3, ChangeMessageVisibilityCommand, {
-      QueueUrl: 'https://sqs.eu-west-1.amazonaws.com/test-account-id/TestQueue',
-      ReceiptHandle: 'testReceiptHandle2',
-      VisibilityTimeout: 60
-    })
-    expect(sqsMock).toHaveReceivedNthCommandWith(4, ChangeMessageVisibilityCommand, {
-      QueueUrl: 'https://sqs.eu-west-1.amazonaws.com/test-account-id/TestQueue',
-      ReceiptHandle: 'testReceiptHandle3',
-      VisibilityTimeout: 80
-    })
   })
 
   test('should ignore non ObjectCreated events', async () => {
