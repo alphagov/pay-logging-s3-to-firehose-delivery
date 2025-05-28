@@ -1,7 +1,8 @@
-import { Callback, Context, S3ObjectCreatedNotificationEvent, SQSEvent } from 'aws-lambda'
+import { Callback, Context, S3ObjectCreatedNotificationEvent, SQSBatchResponse, SQSEvent, SQSRecord } from 'aws-lambda'
 import { handler, LogRecord } from './index'
 
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
+import { ChangeMessageVisibilityCommand, SQSClient } from '@aws-sdk/client-sqs'
 import { FirehoseClient, PutRecordCommand, PutRecordCommandInput } from '@aws-sdk/client-firehose'
 import { mockClient } from 'aws-sdk-client-mock'
 import 'aws-sdk-client-mock-jest'
@@ -15,6 +16,7 @@ import readline from 'node:readline'
 const gzipPromise = promisify(gzip)
 
 const s3Mock = mockClient(S3Client)
+const sqsMock = mockClient(SQSClient)
 const firehoseMock = mockClient(FirehoseClient)
 
 export const mockCallback: Callback = () => undefined
@@ -36,27 +38,29 @@ export const mockContext: Context = {
 
 let testS3EventNotification: S3ObjectCreatedNotificationEvent
 
-function getSQSEvent(): SQSEvent {
-  return {
-    Records: [
-      {
-        body: JSON.stringify(testS3EventNotification),
-        messageId: 'testMessageId',
-        receiptHandle: 'testReceiptHandle',
-        attributes: {
-          ApproximateReceiveCount: '0',
-          SentTimestamp: 'TestTimestamp',
-          SenderId: 'testSenderId',
-          ApproximateFirstReceiveTimestamp: 'TestApproxFirstReceive'
-        },
-        messageAttributes: {},
-        md5OfBody: '123',
-        eventSource: '123',
-        eventSourceARN: '123',
-        awsRegion: 'eu-west-1'
-      }
-    ]
+function getSQSEvent(numberOfRecords: number): SQSEvent {
+  const records: SQSRecord[] = []
+
+  for (let i = 0; i < numberOfRecords; i++) {
+    records.push({
+      body: JSON.stringify(testS3EventNotification),
+      messageId: `testMessageId${i}`,
+      receiptHandle: `testReceiptHandle${i}`,
+      attributes: {
+        ApproximateReceiveCount: '0',
+        SentTimestamp: 'TestTimestamp',
+        SenderId: 'testSenderId',
+        ApproximateFirstReceiveTimestamp: 'TestApproxFirstReceive'
+      },
+      messageAttributes: {},
+      md5OfBody: '123',
+      eventSource: '123',
+      eventSourceARN: 'https://sqs.eu-west-1.amazonaws.com/123456789012/TestQueue',
+      awsRegion: 'eu-west-1'
+    })
   }
+
+  return { Records: records }
 }
 
 describe('Test S3 to Firehose delivery lambda', () => {
@@ -67,6 +71,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
     firehoseMock.reset()
     s3Mock.reset()
+    sqsMock.reset()
 
     testS3EventNotification = {
       'version': '0',
@@ -104,7 +109,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
     const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 10)))
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
-    const sqsEvent = getSQSEvent()
+    const sqsEvent = getSQSEvent(1)
 
     await handler(sqsEvent, mockContext, mockCallback)
 
@@ -124,7 +129,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
     const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 10)))
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
-    const sqsEvent = getSQSEvent()
+    const sqsEvent = getSQSEvent(1)
 
     await handler(sqsEvent, mockContext, mockCallback)
 
@@ -144,7 +149,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
     const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 1000)))
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
-    const sqsEvent = getSQSEvent()
+    const sqsEvent = getSQSEvent(1)
 
     await handler(sqsEvent, mockContext, mockCallback)
 
@@ -164,11 +169,118 @@ describe('Test S3 to Firehose delivery lambda', () => {
     )
   })
 
+  test('should return an SQSBatchResponse with no failures when all records processed', async () => {
+    testS3EventNotification.detail.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
+    const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 1000)))
+    s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
+
+    const sqsEvent = getSQSEvent(1)
+
+    const response = await handler(sqsEvent, mockContext, mockCallback)
+
+    expect(response).toBeDefined()
+
+    const typedResponse = response as SQSBatchResponse
+
+    expect(typedResponse.batchItemFailures).toHaveLength(0)
+  })
+
+  test('should fail all records after one which receives a Slow Down. error and delay them in SQS', async () => {
+    testS3EventNotification.detail.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
+    const s3ObjectStreams = [
+      sdkStreamMixin(Readable.from(createLogStream(1, 10))),
+      sdkStreamMixin(Readable.from(createLogStream(1, 10)))
+    ]
+    s3Mock.on(GetObjectCommand).resolvesOnce({ Body: s3ObjectStreams[0] }).resolvesOnce({ Body: s3ObjectStreams[1] })
+
+    sqsMock.on(ChangeMessageVisibilityCommand).resolves({})
+
+    firehoseMock
+      .on(PutRecordCommand)
+      .resolvesOnce({})
+      .rejectsOnce('Slow down.')
+      .rejects()
+
+    const sqsEvent = getSQSEvent(4)
+
+    const response = await handler(sqsEvent, mockContext, mockCallback)
+
+    expect(response).toBeDefined()
+
+    const typedResponse = response as SQSBatchResponse
+
+    expect(typedResponse.batchItemFailures).toEqual([
+      { itemIdentifier: 'testMessageId1' },
+      { itemIdentifier: 'testMessageId2' },
+      { itemIdentifier: 'testMessageId3' }
+    ])
+
+    expect(firehoseMock.commandCalls(PutRecordCommand)).toHaveLength(2)
+  })
+
+  test('should delay messages longer based on the receive count', async () => {
+    testS3EventNotification.detail.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
+    const s3ObjectStreams = [
+      sdkStreamMixin(Readable.from(createLogStream(1, 10))),
+      sdkStreamMixin(Readable.from(createLogStream(1, 10)))
+    ]
+    s3Mock.on(GetObjectCommand).resolvesOnce({ Body: s3ObjectStreams[0] }).resolvesOnce({ Body: s3ObjectStreams[1] })
+
+    sqsMock.on(ChangeMessageVisibilityCommand).resolves({})
+
+    firehoseMock
+      .on(PutRecordCommand)
+      .rejects('Slow down.')
+
+    const sqsEvent = getSQSEvent(4)
+
+    sqsEvent.Records[0].attributes.ApproximateReceiveCount = '0'
+    sqsEvent.Records[1].attributes.ApproximateReceiveCount = '1'
+    sqsEvent.Records[2].attributes.ApproximateReceiveCount = '2'
+    sqsEvent.Records[3].attributes.ApproximateReceiveCount = '3'
+
+    const response = await handler(sqsEvent, mockContext, mockCallback)
+
+    expect(response).toBeDefined()
+
+    const typedResponse = response as SQSBatchResponse
+
+    expect(typedResponse.batchItemFailures).toEqual([
+      { itemIdentifier: 'testMessageId0' },
+      { itemIdentifier: 'testMessageId1' },
+      { itemIdentifier: 'testMessageId2' },
+      { itemIdentifier: 'testMessageId3' }
+    ])
+
+    expect(firehoseMock.commandCalls(PutRecordCommand)).toHaveLength(1)
+
+    expect(sqsMock).toHaveReceivedNthCommandWith(1, ChangeMessageVisibilityCommand, {
+      QueueUrl: 'https://sqs.eu-west-1.amazonaws.com/test-account-id/TestQueue',
+      ReceiptHandle: 'testReceiptHandle0',
+      VisibilityTimeout: 20
+    })
+    expect(sqsMock).toHaveReceivedNthCommandWith(2, ChangeMessageVisibilityCommand, {
+      QueueUrl: 'https://sqs.eu-west-1.amazonaws.com/test-account-id/TestQueue',
+      ReceiptHandle: 'testReceiptHandle1',
+      VisibilityTimeout: 40
+    })
+    expect(sqsMock).toHaveReceivedNthCommandWith(3, ChangeMessageVisibilityCommand, {
+      QueueUrl: 'https://sqs.eu-west-1.amazonaws.com/test-account-id/TestQueue',
+      ReceiptHandle: 'testReceiptHandle2',
+      VisibilityTimeout: 60
+    })
+    expect(sqsMock).toHaveReceivedNthCommandWith(4, ChangeMessageVisibilityCommand, {
+      QueueUrl: 'https://sqs.eu-west-1.amazonaws.com/test-account-id/TestQueue',
+      ReceiptHandle: 'testReceiptHandle3',
+      VisibilityTimeout: 80
+    })
+  })
+
   test('should ignore non ObjectCreated events', async () => {
     // @ts-expect-error: We are explicitly testing for a scenario where the detail-type isn't Object Created
     testS3EventNotification['detail-type'] = 'Object Removed'
 
-    const sqsEvent = getSQSEvent()
+    const sqsEvent = getSQSEvent(1)
 
     expect(await handler(sqsEvent, mockContext, mockCallback))
 
@@ -180,7 +292,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
     // @ts-expect-error: We are explicitly testing for a scenario where the event is missing the records field
     testS3EventNotification.source = 'aws.cloudtrail'
 
-    const sqsEvent = getSQSEvent()
+    const sqsEvent = getSQSEvent(1)
 
     await expect(handler(sqsEvent, mockContext, mockCallback)).rejects.toThrow('Error processing SQS message: Invalid S3 event format')
 
@@ -192,7 +304,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
     testS3EventNotification.detail.object.key = 'alb/env-2/app-ecs-alb-name/AWSLogs/1231241241/elasticloadbalancing/2025/01/01/log.gz'
     s3Mock.rejects('Error getting S3 object')
 
-    const sqsEvent = getSQSEvent()
+    const sqsEvent = getSQSEvent(1)
 
     await expect(handler(sqsEvent, mockContext, mockCallback)).rejects.toThrow('Error processing SQS message: Error getting S3 object')
 
@@ -209,7 +321,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
     const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 10)))
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
-    const sqsEvent = getSQSEvent()
+    const sqsEvent = getSQSEvent(1)
 
     await expect(handler(sqsEvent, mockContext, mockCallback)).rejects.toThrow('Error processing SQS message: Error deriving ALB name')
 
@@ -226,7 +338,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
     const s3ObjectStream = sdkStreamMixin(Readable.from(createLogStream(1, 10)))
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
 
-    const sqsEvent = getSQSEvent()
+    const sqsEvent = getSQSEvent(1)
 
     await expect(handler(sqsEvent, mockContext, mockCallback)).rejects.toThrow('Error processing SQS message: Error deriving S3 bucket name')
 
@@ -243,7 +355,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
     s3Mock.on(GetObjectCommand).resolves({ Body: s3ObjectStream })
     firehoseMock.rejects('Error sending logs to Firehose')
 
-    const sqsEvent = getSQSEvent()
+    const sqsEvent = getSQSEvent(1)
 
     await expect(handler(sqsEvent, mockContext, mockCallback)).rejects.toThrow('Error processing SQS message: Error sending logs to Firehose')
 
@@ -260,7 +372,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
   test('should error when FIREHOSE_STREAM_NAME environment variable is not set', async () => {
     delete process.env.FIREHOSE_STREAM_NAME
-    const sqsEvent = getSQSEvent()
+    const sqsEvent = getSQSEvent(1)
 
     await expect(handler(sqsEvent, mockContext, mockCallback)).rejects.toThrow('Environment variable FIREHOSE_STREAM_NAME is missing')
 
@@ -270,7 +382,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
   test('should error when AWS_ACCOUNT_ID environment variable is not set', async () => {
     delete process.env.AWS_ACCOUNT_ID
-    const sqsEvent = getSQSEvent()
+    const sqsEvent = getSQSEvent(1)
 
     await expect(handler(sqsEvent, mockContext, mockCallback)).rejects.toThrow('Environment variable AWS_ACCOUNT_ID is missing')
 
@@ -280,7 +392,7 @@ describe('Test S3 to Firehose delivery lambda', () => {
 
   test('should error when AWS_ACCOUNT_NAME environment variable is not set', async () => {
     delete process.env.AWS_ACCOUNT_NAME
-    const sqsEvent = getSQSEvent()
+    const sqsEvent = getSQSEvent(1)
 
     // noinspection TypeScriptValidateTypes
     await expect(handler(sqsEvent, mockContext, mockCallback)).rejects.toThrow('Environment variable AWS_ACCOUNT_NAME is missing')
