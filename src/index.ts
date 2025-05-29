@@ -1,4 +1,4 @@
-import { S3ObjectCreatedNotificationEvent, SQSEvent, SQSHandler, SQSRecord } from 'aws-lambda'
+import { S3ObjectCreatedNotificationEvent, SQSBatchResponse, SQSEvent, SQSHandler, SQSRecord } from 'aws-lambda'
 import { GetObjectCommand, S3Client } from '@aws-sdk/client-s3'
 import { FirehoseClient, PutRecordCommand } from '@aws-sdk/client-firehose'
 import { createGunzip } from 'node:zlib'
@@ -25,13 +25,11 @@ export type LogRecord = {
 
 let FIREHOSE_STREAM_NAME: string, AWS_ACCOUNT_ID: string, AWS_ACCOUNT_NAME: string
 
-export const handler: SQSHandler = async (sqsEvent: SQSEvent) => {
+export const handler: SQSHandler = async (sqsEvent: SQSEvent): Promise<SQSBatchResponse> => {
   try {
     ({ AWS_ACCOUNT_ID, AWS_ACCOUNT_NAME, FIREHOSE_STREAM_NAME } = checkAndGetEnvironmentVariables())
 
-    for (const sqsRecord of sqsEvent.Records) {
-      await processSqsRecord(sqsRecord)
-    }
+    return await processSQSEventWithSlowDownHandler(sqsEvent)
   } catch (error: unknown) {
     if (error instanceof Error) {
       let errorMessage = `Error processing SQS message: ${error.message}`
@@ -68,6 +66,33 @@ function checkAndGetEnvironmentVariables() {
   }
 
   return { FIREHOSE_STREAM_NAME, AWS_ACCOUNT_ID, AWS_ACCOUNT_NAME }
+}
+
+async function processSQSEventWithSlowDownHandler(sqsEvent: SQSEvent): Promise<SQSBatchResponse> {
+  const batchResponse: SQSBatchResponse = {
+    batchItemFailures: []
+  }
+  let firehoseSlowDownReceived: boolean = false
+
+  for (const sqsRecord of sqsEvent.Records) {
+    if (firehoseSlowDownReceived) {
+      batchResponse.batchItemFailures.push({ itemIdentifier: sqsRecord.messageId })
+      continue
+    }
+
+    try {
+      await processSqsRecord(sqsRecord)
+    } catch (error: unknown) {
+      if (error instanceof Error && error.message === 'Slow down.') {
+        firehoseSlowDownReceived = true
+        batchResponse.batchItemFailures.push({ itemIdentifier: sqsRecord.messageId })
+      } else {
+        throw error
+      }
+    }
+  }
+
+  return batchResponse
 }
 
 async function processSqsRecord(sqsRecord: SQSRecord) {
